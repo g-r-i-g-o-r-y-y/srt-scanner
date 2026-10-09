@@ -205,6 +205,36 @@ def show_ws(line):
     return "␣" * lead + core + "␣" * trail
 
 
+def cue_after(cue, fixes):
+    """A cue's non-blank text lines [(file line no, text)] and {file line no: text after the fixes}.
+    Overlapping edits on one line keep the first, as apply_fixes.py does."""
+    lines = [(ln, t) for ln, t in cue["text_lines"] if t.strip()]
+    new = {ln: t for ln, t in lines}
+    edits = {}
+    for fx in fixes:
+        if "edit" in fx:
+            es = edits.setdefault(fx["line_no"], [])
+            e = fx["edit"]
+            if e not in es and all(e["end"] <= o["start"] or e["start"] >= o["end"] for o in es):
+                es.append(e)
+    for ln, es in edits.items():
+        t = new.get(ln, "")
+        for e in sorted(es, key=lambda e: -e["start"]):
+            t = t[:e["start"]] + e["new"] + t[e["end"]:]
+        new[ln] = t
+    for fx in fixes:
+        ln = fx.get("line_no")
+        if ln is None and "cue" in fx and "line" in fx and 1 <= fx["line"] <= len(lines):
+            ln = lines[fx["line"] - 1][0]
+        if "replace_line" in fx and ln in new:
+            new[ln] = fx["replace_line"]
+        elif "find" in fx and ln in new:
+            new[ln] = new[ln].replace(fx["find"], fx["replace"], 1)
+        elif "delete_line" in fx:
+            new.pop(fx["delete_line"], None)
+    return lines, new
+
+
 def _per_cue(path, row, cues_by_n, line_to_cue):
     """Split a row's fixes by cue and compute each cue's current and corrected text."""
     by_cue = {}
@@ -221,27 +251,7 @@ def _per_cue(path, row, cues_by_n, line_to_cue):
         if not cue:
             out.append((c, None, row["current"], row["suggested"], fixes))
             continue
-        lines = [(ln, t) for ln, t in cue["text_lines"] if t.strip()]
-        new = {ln: t for ln, t in lines}
-        edits = {}
-        for fx in fixes:
-            if "edit" in fx:
-                edits.setdefault(fx["line_no"], []).append(fx["edit"])
-        for ln, es in edits.items():
-            t = new.get(ln, "")
-            for e in sorted(es, key=lambda e: -e["start"]):
-                t = t[:e["start"]] + e["new"] + t[e["end"]:]
-            new[ln] = t
-        for fx in fixes:
-            ln = fx.get("line_no")
-            if ln is None and "cue" in fx and "line" in fx and 1 <= fx["line"] <= len(lines):
-                ln = lines[fx["line"] - 1][0]
-            if "replace_line" in fx and ln in new:
-                new[ln] = fx["replace_line"]
-            elif "find" in fx and ln in new:
-                new[ln] = new[ln].replace(fx["find"], fx["replace"], 1)
-            elif "delete_line" in fx:
-                new.pop(fx["delete_line"], None)
+        lines, new = cue_after(cue, fixes)
         if any("delete_cue" in fx for fx in fixes):
             sug = "Delete this cue"
         elif fixes:
@@ -390,7 +400,9 @@ def render(state, out_md):
         name_row = None
         for r in [r for r in rows if r["cat"] == "File name"]:
             name_row = f"| – | – | {esc(r['current'])} | {esc(r['suggested'])} | {esc(plain_reason(r['reason']))} |\n"
-            items[f"{n}:file-name"] = {"file": f["path"], "bucket": "fix", "fixes": r["fixes"]}
+            items[f"{n}:file-name"] = {"file": f["path"], "bucket": "fix", "fixes": r["fixes"],
+                                       "view": dict(cat="File name", current=r["current"], suggested=r["suggested"],
+                                                    reason=plain_reason(r["reason"]))}
         for k, r in enumerate(rows, 1):
             rid = f"{n}.{k}" if multi else str(k)
             work.append(f"| {r['cat']} | {rid} | {cue_list(r['cues'])} | {short_ts(r['ts'])} | {esc(r['current'])} | "
@@ -458,7 +470,8 @@ def render(state, out_md):
                 grouped.setdefault(key, []).append(row)
             for key, rs in grouped.items():
                 for c, ts, cur, sug, reason, fx, cat in rs:
-                    items[f"{n}:{c}"] = {"file": f["path"], "cue": c, "bucket": "call", "fixes": fx}
+                    items[f"{n}:{c}"] = {"file": f["path"], "cue": c, "bucket": "call", "fixes": fx,
+                                         "view": dict(cat=cat, ts=ts, current=cur, suggested=sug, reason=reason)}
                 c, ts, cur, sug, reason, fx, cat = rs[0]
                 ca, cb = mark_diff(cur, sug)
                 if len(rs) > 1:
@@ -471,20 +484,26 @@ def render(state, out_md):
         if fixes_rows or fmt or name_row:
             md.append("\n### Corrections\n\n| Line # | Timestamp | Error | Suggested fix | Reason |\n|---|---|---|---|---|\n")
             for c, ts, cur, sug, reason, fx, cat in fixes_rows:
-                items[f"{n}:{c}"] = {"file": f["path"], "cue": c, "bucket": "fix", "fixes": fx}
+                items[f"{n}:{c}"] = {"file": f["path"], "cue": c, "bucket": "fix", "fixes": fx,
+                                     "view": dict(cat=cat, ts=ts, current=cur, suggested=sug, reason=reason)}
             rendered = combine_repeats(fixes_rows)
             n_combined = sum(1 for r_ in rendered if "| e.g. " in r_)
             fmt_rows = []
             file_fmt_row = None
             for k_, (label, v) in enumerate(fmt.items()):
                 if not v["per_cue"]:  # file format: always the first row of Corrections
-                    items[f"{n}:file-format"] = {"file": f["path"], "bucket": "format", "fixes": v["fixes"]}
                     err, fixd = format_wording(f, state["issues"].get(str(n), []) if "issues" in state else [])
+                    items[f"{n}:file-format"] = {"file": f["path"], "bucket": "format", "fixes": v["fixes"],
+                                                 "view": dict(cat="Structure", current=err, suggested=fixd,
+                                                              reason="File format.", group="File format")}
                     file_fmt_row = f"| – | – | {esc(err)} | {esc(fixd)} | File format. |\n"
                     continue
                 pcs = sorted(v["per_cue"].items(), key=lambda kv: kv[0] or 0)
                 for c, (ts, cur, sug, fx) in pcs:
-                    items[f"{n}:{c}:fmt{k_}"] = {"file": f["path"], "cue": c, "bucket": "format", "fixes": fx}
+                    items[f"{n}:{c}:fmt{k_}"] = {"file": f["path"], "cue": c, "bucket": "format", "fixes": fx,
+                                                 "view": dict(cat="Formatting", ts=ts, current=cur, suggested=sug,
+                                                              reason=label[:1].upper() + label[1:] + ".",
+                                                              group=label[:1].upper() + label[1:])}
                 c0, (ts0, cur0, sug0, _) = pcs[0]
                 lines = ", ".join(str(c) for c, _ in pcs)
                 eg = "e.g. " if len(pcs) > 1 else ""
@@ -493,6 +512,14 @@ def render(state, out_md):
                                 f"{esc(label[:1].upper() + label[1:])}. |\n")
             md.extend(([name_row] if name_row else []) + ([file_fmt_row] if file_fmt_row else [])
                       + rendered[:n_combined] + fmt_rows + rendered[n_combined:])
+        # every cue's text after all of its fixes (corrections and formatting), for editing a fix by hand
+        for k_, it in items.items():
+            if k_.startswith(f"{n}:") and it.get("cue") in cues_by_n and "view" in it:
+                fx_all = [x for kk, ii in items.items() if kk.startswith(f"{n}:") and ii.get("cue") == it["cue"]
+                          for x in ii["fixes"]]
+                lines, new = cue_after(cues_by_n[it["cue"]], fx_all)
+                it["view"]["line_nos"] = [ln for ln, _ in lines]
+                it["view"]["edit_text"] = [x for ln, _ in lines if ln in new for x in new[ln].split("\n")]
         if not rows:
             md.append("\nNo issues found.\n")
     head = ["\n| # | File | Corrections | Needs your call |\n|---|---|---|---|\n"]
