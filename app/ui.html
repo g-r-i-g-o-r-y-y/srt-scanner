@@ -59,8 +59,8 @@ textarea { width: 100%; font: 14px/1.4 ui-monospace, Consolas, monospace; backgr
 .note { background: var(--warn); border: 1px solid var(--warn-line); border-radius: 8px; padding: 10px 12px; margin: 12px 0; }
 .group-head { cursor: pointer; }
 .group-head td { font-weight: 600; }
-.group-items { display: none; }
-.group-items.open { display: table-row-group; }
+.group-items.closed { display: none; }
+.group-head .toggle { font-weight: 400; }
 .file-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line);
   padding: 12px 16px; display: none; }
@@ -245,7 +245,7 @@ function fileHtml(f) {
       const id = `g${f.n}-${g}`;
       if (rs.length === 1 && name === "File format") { h += `<tbody>${rowHtml(rs[0])}</tbody>`; continue; }
       h += `<tbody><tr class="group-head" data-group="${id}"><td class="cb"><input type="checkbox" class="gcb" data-group="${id}"></td>
-        <td colspan="6">${esc(name)} <span class="muted">· ${rs.length} line${rs.length > 1 ? "s" : ""} · click to show</span></td></tr></tbody>
+        <td colspan="6">${esc(name)} <span class="muted">· ${rs.length} line${rs.length > 1 ? "s" : ""} · <span class="toggle">hide</span></span></td></tr></tbody>
         <tbody class="group-items" id="${id}">${rs.map(r => rowHtml(r, id)).join("")}</tbody>`;
     }
     h += `</table>`;
@@ -286,7 +286,10 @@ function wire() {
       sync();
     };
   });
-  document.querySelectorAll(".group-head").forEach(tr => tr.onclick = () => $("#" + tr.dataset.group).classList.toggle("open"));
+  document.querySelectorAll(".group-head").forEach(tr => tr.onclick = () => {
+    const closed = $("#" + tr.dataset.group).classList.toggle("closed");
+    tr.querySelector(".toggle").textContent = closed ? "show" : "hide";
+  });
   document.querySelectorAll("tr[data-key]").forEach(tr => {
     const r = byKey[tr.dataset.key];
     if (!canEdit(r)) return;

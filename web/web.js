@@ -102,6 +102,16 @@
   };
 
   if ("serviceWorker" in navigator && window.isSecureContext) {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    // A new version installs in the background; switch to it at once unless a check is on screen.
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController) return;
+      if (!document.querySelector("section[data-file]")) return location.reload();
+      const note = document.createElement("div");
+      note.className = "note";
+      note.innerHTML = 'A newer version of SRT Scanner is ready. <a href="">Reload</a> to use it (finish this batch first).';
+      $("#extras").prepend(note);
+    });
+    navigator.serviceWorker.register("sw.js").then(reg => reg.update()).catch(() => {});
   }
 })();
