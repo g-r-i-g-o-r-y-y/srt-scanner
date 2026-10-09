@@ -1,0 +1,51 @@
+# Builds the in-browser version (web/build.py) and publishes it with GitHub Pages.
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+name: Publish web app
+
+on:
+  push:
+    branches: [main, claude/offline-functionality-d6oaxh]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  PYODIDE_VERSION: "0.28.3"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Download Pyodide
+        run: |
+          curl -sSfL -o pyodide.tar.bz2 \
+            "https://github.com/pyodide/pyodide/releases/download/${PYODIDE_VERSION}/pyodide-core-${PYODIDE_VERSION}.tar.bz2"
+          tar xjf pyodide.tar.bz2
+      - name: Check the engine still runs
+        run: PYTHONPATH=vendor python engine/scripts/build_report.py "samples/Example (2001).en.srt" --out /tmp/report.md
+      - name: Build site
+        run: python web/build.py --pyodide pyodide --out _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

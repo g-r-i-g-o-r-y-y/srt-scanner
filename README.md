@@ -4,15 +4,35 @@ An offline version of the `srt-qa` Claude skill. It checks OCR'd English subtitl
 through Subtitle Edit) against the same house style, shows you every finding, and writes corrected
 copies containing only the fixes you tick. Nothing leaves your computer.
 
-## Running it
+## In your browser
 
-You need Python 3.8 or newer. Nothing else: the spellchecker and its English dictionary are bundled.
+Open **https://g-r-i-g-o-r-y-y.github.io/srt-scanner/**. Nothing to install: the same Python engine runs
+inside the page (via [Pyodide](https://pyodide.org)), and your subtitle files never leave your computer.
+The first visit downloads about 13 MB; after that the page opens from your browser's cache and works
+with no internet connection.
+
+Accepted words and the list of finished files are saved in that browser. Use **Export** to back them up
+or move them to another browser, and **Import** to load an export (it also takes the desktop app's
+`accepted_words.txt` or `srt_qa_ledger.json`). Clearing the site's data in your browser settings erases
+them.
+
+The site is rebuilt and published by `.github/workflows/pages.yml` on every push. It needs a one-time
+switch in the repository: Settings → Pages → Build and deployment → Source: **GitHub Actions**.
+
+## On your computer
+
+The desktop version keeps its data in a normal folder instead of the browser. You need Python 3.8 or
+newer. Nothing else: the spellchecker and its English dictionary are bundled.
 
 - **Windows:** double-click `Start SRT Scanner.bat`.
 - **macOS:** double-click `Start SRT Scanner.command` (the first time, right-click → Open).
 - **Anywhere:** `python3 srt_scanner.py`
 
-Your browser opens on a page served from `127.0.0.1`. Drop in `.srt` files or a `.zip` of them, click
+Your browser opens on a page served from `127.0.0.1`.
+
+## Using it
+
+Drop in `.srt` files or a `.zip` of them, click
 **Check files**, untick anything you don't want, then **Apply selected fixes** and download the zip.
 
 Rows fall into the same three groups as the skill's report. Needs your call holds the guesses
@@ -27,7 +47,7 @@ spelled two ways in one file (Kenji / Kenzi) are listed at the top of that file.
 
 Your originals are never modified and timestamps are verified unchanged on every corrected file.
 
-## Where things are kept
+## Where the desktop version keeps things
 
 Everything goes in `~/SRT Scanner` (change it with `--data DIR`):
 
@@ -60,8 +80,11 @@ names box and any unknown-word rows a look before applying.
 
 ```
 srt_scanner.py        launcher (app, check, apply)
-app/server.py         local web server (stdlib only, listens on 127.0.0.1)
-app/ui.html           the page
+app/core.py           what the app does (check, apply, accepted words), shared by both versions
+app/server.py         desktop: local web server (stdlib only, listens on 127.0.0.1)
+app/webapi.py         browser: entry points for Pyodide
+app/ui.html           the page, used by both
+web/                  browser build: web.js (loads Pyodide), sw.js (offline cache), build.py
 engine/scripts/       srt-qa checker, report builder and fix applier
 engine/references/    house-style references: OCR fix list (Subtitle Edit, MIT), place names, accepted words
 vendor/spellchecker/  pyspellchecker 0.9.0 (MIT), English dictionary only

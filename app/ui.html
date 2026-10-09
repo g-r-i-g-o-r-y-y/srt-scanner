@@ -91,6 +91,7 @@ pre { white-space: pre-wrap; word-break: break-word; }
     </div>
   </section>
 
+  <div id="extras"></div>
   <div id="results"></div>
   <div id="done"></div>
 </main>
@@ -112,6 +113,8 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&
 let queue = [], run = null, data = null;
 const picked = new Set(), edits = {};
 
+// The page talks to a backend: the local Python server (below), or the in-browser engine that the
+// GitHub Pages build defines as window.srtBackend before this script runs (web/web.js).
 async function api(path, body, raw) {
   const r = await fetch(path, {method: "POST", body: raw ? body : JSON.stringify(body || {}),
     headers: raw ? {"Content-Type": "application/octet-stream"} : {"Content-Type": "application/json"}});
@@ -119,6 +122,17 @@ async function api(path, body, raw) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
+const localServer = {
+  kind: "local",
+  ready: Promise.resolve(),
+  newRun: async () => (await api("/api/run")).run,
+  upload: (run, name, buf) => api(`/api/upload?run=${encodeURIComponent(run)}&name=${encodeURIComponent(name)}`, buf, true),
+  check: (run, recheck) => api("/api/check", {run, recheck}),
+  apply: (run, picked, edits) => api("/api/apply", {run, picked, edits}),
+  acceptWord: word => api("/api/accept-word", {word}),
+  downloadUrl: async (run, file) => `/api/download?run=${encodeURIComponent(run)}&file=${encodeURIComponent(file)}`,
+};
+const backend = window.srtBackend || localServer;
 
 // ---------- choosing files ----------
 const drop = $("#drop"), pick = $("#pick");
@@ -141,13 +155,14 @@ $("#go").onclick = async () => {
   $("#done").innerHTML = "";
   const st = $("#status");
   try {
-    st.textContent = "Uploading to the local checker...";
-    run = (await api("/api/run")).run;
-    for (const f of queue) {
-      await api(`/api/upload?run=${encodeURIComponent(run)}&name=${encodeURIComponent(f.name)}`, await f.arrayBuffer(), true);
-    }
-    st.textContent = "Checking (a feature-length file takes a few seconds)...";
-    data = await api("/api/check", {run, recheck: $("#recheck").checked});
+    st.textContent = "Loading the checker...";
+    await backend.ready;
+    st.textContent = "Reading files...";
+    run = await backend.newRun();
+    for (const f of queue) await backend.upload(run, f.name, await f.arrayBuffer());
+    st.textContent = `Checking ${queue.length} file${queue.length === 1 ? "" : "s"} (a few seconds each)...`;
+    await new Promise(r => setTimeout(r, 30));  // let the status paint before a long check
+    data = await backend.check(run, $("#recheck").checked);
     st.textContent = "";
     render();
   } catch (e) {
@@ -269,7 +284,7 @@ function wire() {
   document.querySelectorAll(".edit").forEach(btn => btn.onclick = () => startEdit(btn, byKey[btn.dataset.key]));
   document.querySelectorAll(".accept").forEach(btn => btn.onclick = async () => {
     try {
-      await api("/api/accept-word", {word: btn.dataset.word});
+      await backend.acceptWord(btn.dataset.word);
       btn.replaceWith(Object.assign(document.createElement("span"), {className: "muted", textContent: `“${btn.dataset.word}” won't be flagged again.`}));
     } catch (e) { alert(e.message); }
   });
@@ -321,14 +336,14 @@ $("#apply").onclick = async () => {
   btn.disabled = true;
   try {
     const sendEdits = Object.fromEntries(Object.entries(edits).filter(([k]) => picked.has(k)));
-    const r = await api("/api/apply", {run, picked: [...picked], edits: sendEdits});
-    const dl = f => `/api/download?run=${encodeURIComponent(run)}&file=${encodeURIComponent(f)}`;
+    const r = await backend.apply(run, [...picked], sendEdits);
+    const zipUrl = r.zip && await backend.downloadUrl(run, r.zip), reportUrl = await backend.downloadUrl(run, "report.md");
     let h = `<section class="panel"><h2>Done</h2>`;
     if (r.timestamp_problem) h += `<p class="err">A timestamp changed in one of the files, so don't use it. Details below.</p>`;
     h += `<p>${r.applied} fix${r.applied === 1 ? "" : "es"} applied to ${r.files.length} file${r.files.length === 1 ? "" : "s"}.` +
       (r.skipped.length ? ` ${r.skipped.length} couldn't be applied (listed below).` : "") + `</p>`;
-    if (r.zip) h += `<p><a href="${dl(r.zip)}"><b>Download corrected files (.zip)</b></a> · <a href="${dl("report.md")}">report.md</a></p>`;
-    h += `<p class="muted">Also saved in <code>${esc(r.folder)}</code>. Your original files weren't changed.</p>`;
+    if (r.zip) h += `<p><a href="${zipUrl}" download="${esc(r.zip)}"><b>Download corrected files (.zip)</b></a> · <a href="${reportUrl}" download="report.md">report.md</a></p>`;
+    h += `<p class="muted">${r.folder ? `Also saved in <code>${esc(r.folder)}</code>. ` : ""}Your original files weren't changed.</p>`;
     if (r.skipped.length) h += `<pre>${esc(r.skipped.join("\n"))}</pre>`;
     h += `<details><summary class="muted">Full log</summary><pre>${esc(r.log)}</pre></details></section>`;
     $("#done").innerHTML = h;
