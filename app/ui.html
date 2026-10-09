@@ -46,6 +46,10 @@ td.num { white-space: nowrap; width: 60px; }
 td.ts { white-space: nowrap; width: 80px; color: var(--muted); }
 td.txt { width: 32%; word-break: break-word; }
 td.why { color: var(--muted); }
+td.fix.editable { cursor: text; }
+td.fix.editable:hover { outline: 1px dashed var(--line); outline-offset: -3px; border-radius: 4px; }
+.mine { display: inline-block; font-size: 11px; font-weight: 600; background: var(--accent); color: var(--accent-text);
+  border-radius: 4px; padding: 0 5px; margin-right: 2px; }
 tr.off td:not(.cb) { opacity: .45; }
 del { background: var(--del); color: var(--del-text); text-decoration: none; border-radius: 3px; padding: 0 1px; }
 ins { background: var(--ins); color: var(--ins-text); text-decoration: none; border-radius: 3px; padding: 0 1px; }
@@ -206,6 +210,7 @@ function render() {
   }
   let html = "";
   if (data.skipped) html += `<div class="note">${data.skipped} file(s) skipped: already finished and unchanged since. Tick "Re-check files already finished" to include them.</div>`;
+  html += `<p class="muted">Untick anything you don't want. To write your own fix, click a suggested fix (or Edit).</p>`;
   for (const f of data.files) html += fileHtml(f);
   res.innerHTML = html;
   $("#bar").style.display = "block";
@@ -227,21 +232,21 @@ function fileHtml(f) {
       `<br><span class="muted">Fix the odd one out with Edit on its line below if it has a row, or in Subtitle Edit.</span></div>`;
   }
   if (calls.length) {
-    h += `<h3>Needs your call</h3><p class="muted" style="margin:0 0 6px">Not applied unless you tick them. Use Edit to write your own fix.</p>` + table(calls);
+    h += `<h3>Needs your call</h3><p class="muted" style="margin:0 0 6px">Not applied unless you tick them.</p>` + table(calls);
   }
   if (fixes.length) h += `<h3>Corrections</h3>` + table(fixes);
   if (fmt.length) {
-    h += `<h3>Formatting (house style)</h3><table><thead><tr><th></th><th>Line #</th><th class="ts">Time</th><th>Error</th><th>Fix</th><th>Type</th></tr></thead>`;
+    h += `<h3>Formatting (house style)</h3><table><thead><tr><th></th><th>Line #</th><th class="ts">Time</th><th>Error</th><th>Fix</th><th>Type</th><th></th></tr></thead>`;
     const groups = {};
     for (const r of fmt) (groups[r.group] ??= []).push(r);
     let g = 0;
     for (const [name, rs] of Object.entries(groups)) {
       g++;
       const id = `g${f.n}-${g}`;
-      if (rs.length === 1 && name === "File format") { h += `<tbody>${rowHtml(rs[0], false)}</tbody>`; continue; }
+      if (rs.length === 1 && name === "File format") { h += `<tbody>${rowHtml(rs[0])}</tbody>`; continue; }
       h += `<tbody><tr class="group-head" data-group="${id}"><td class="cb"><input type="checkbox" class="gcb" data-group="${id}"></td>
-        <td colspan="5">${esc(name)} <span class="muted">· ${rs.length} line${rs.length > 1 ? "s" : ""} · click to show</span></td></tr></tbody>
-        <tbody class="group-items" id="${id}">${rs.map(r => rowHtml(r, false, id)).join("")}</tbody>`;
+        <td colspan="6">${esc(name)} <span class="muted">· ${rs.length} line${rs.length > 1 ? "s" : ""} · click to show</span></td></tr></tbody>
+        <tbody class="group-items" id="${id}">${rs.map(r => rowHtml(r, id)).join("")}</tbody>`;
     }
     h += `</table>`;
   }
@@ -250,19 +255,20 @@ function fileHtml(f) {
 
 function table(rows) {
   return `<table><thead><tr><th></th><th>Line #</th><th class="ts">Time</th><th>Text</th><th>Fix</th><th>Why</th><th></th></tr></thead>
-    <tbody>${rows.map(r => rowHtml(r, true)).join("")}</tbody></table>`;
+    <tbody>${rows.map(r => rowHtml(r)).join("")}</tbody></table>`;
 }
 
-function rowHtml(r, editable, group) {
+const canEdit = r => !!(r.line_nos && r.line_nos.length);
+
+function rowHtml(r, group) {
   const [a, b] = r.suggested && r.suggested !== "Delete this cue" ? diff(r.current || "", r.suggested) : [esc(r.current), esc(r.suggested || "–")];
-  const canEdit = editable && r.line_nos && r.line_nos.length;
   const accept = (r.unknown || []).map(w => `<button class="small accept" data-word="${esc(w)}">Accept “${esc(w)}”</button>`).join(" ");
   return `<tr data-key="${esc(r.key)}"${group ? ` data-in="${group}"` : ""}>
     <td class="cb"><input type="checkbox" class="icb" data-key="${esc(r.key)}"${r.has_fix ? "" : " disabled"}></td>
     <td class="num">${r.cue ?? "–"}</td><td class="ts">${esc((r.ts || "").split(",")[0]) || "–"}</td>
-    <td class="txt">${slashes(a)}</td><td class="txt fix">${slashes(b)}</td>
+    <td class="txt">${slashes(a)}</td><td class="txt fix${canEdit(r) ? " editable" : ""}"${canEdit(r) ? ' title="Click to write your own fix"' : ""}>${slashes(b)}</td>
     <td class="why">${esc(r.reason)}${accept ? `<div style="margin-top:4px">${accept}</div>` : ""}</td>
-    ${editable ? `<td class="actions">${canEdit ? `<button class="small edit" data-key="${esc(r.key)}">Edit</button>` : ""}</td>` : ""}</tr>`;
+    <td class="actions">${canEdit(r) ? `<button class="small edit">Edit</button>` : ""}</td></tr>`;
 }
 
 const rowsByKey = () => Object.fromEntries(data.files.flatMap(f => f.rows.map(r => [r.key, r])));
@@ -281,7 +287,18 @@ function wire() {
     };
   });
   document.querySelectorAll(".group-head").forEach(tr => tr.onclick = () => $("#" + tr.dataset.group).classList.toggle("open"));
-  document.querySelectorAll(".edit").forEach(btn => btn.onclick = () => startEdit(btn, byKey[btn.dataset.key]));
+  document.querySelectorAll("tr[data-key]").forEach(tr => {
+    const r = byKey[tr.dataset.key];
+    if (!canEdit(r)) return;
+    tr.querySelector(".fix").onclick = e => { if (!tr.querySelector("textarea")) openEditor(tr, r); };
+    tr.querySelector(".actions").onclick = e => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.classList.contains("edit")) openEditor(tr, r);
+      if (b.classList.contains("done")) closeEditor(tr, r);
+      if (b.classList.contains("undo")) revertEdit(tr, r);
+    };
+  });
   document.querySelectorAll(".accept").forEach(btn => btn.onclick = async () => {
     try {
       await backend.acceptWord(btn.dataset.word);
@@ -290,26 +307,71 @@ function wire() {
   });
 }
 
-function startEdit(btn, r) {
-  const tr = btn.closest("tr"), cell = tr.querySelector(".fix");
-  if (btn.textContent === "Edit") {
-    const ta = document.createElement("textarea");
-    ta.rows = Math.max(2, (edits[r.key] || r.edit_text).length);
-    ta.value = (edits[r.key] || r.edit_text).join("\n");
-    ta.oninput = () => { edits[r.key] = ta.value.split("\n"); picked.add(r.key); sync(); };
-    cell.innerHTML = "";
-    cell.append(ta, Object.assign(document.createElement("div"), {className: "muted",
-      textContent: "One subtitle line per row; this text replaces the whole cue (formatting fixes included). Leave it empty to delete the cue."}));
-    ta.focus();
-    btn.textContent = "Undo edit";
-  } else {
-    delete edits[r.key];
-    if (r.bucket === "call" || !r.has_fix) picked.delete(r.key);
-    const [, b] = r.suggested ? diff(r.current || "", r.suggested) : ["", "–"];
-    cell.innerHTML = slashes(b);
-    btn.textContent = "Edit";
-    sync();
+// ---------- your own text for a line ----------
+// One override per cue: the text replaces the cue's lines as they are in the file, so any other
+// suggestion for the same cue (a formatting fix, say) is left out unless it's in your text.
+const cueOf = r => r.key.split(":")[0] + ":" + r.cue;
+
+function openEditor(tr, r) {
+  const other = Object.keys(edits).find(k => k !== r.key && cueOf(rowsByKey()[k]) === cueOf(r));
+  if (other) {  // move an override made on another row of this cue to this row
+    edits[r.key] = edits[other];
+    delete edits[other];
+    const otr = document.querySelector(`tr[data-key="${CSS.escape(other)}"]`);
+    if (otr) { const o = rowsByKey()[other]; showFix(otr, o); showActions(otr, o); }
+    if (!rowsByKey()[other].has_fix || rowsByKey()[other].bucket === "call") picked.delete(other);
   }
+  const lines = edits[r.key] || r.edit_text;
+  const ta = document.createElement("textarea");
+  ta.rows = Math.max(2, lines.length);
+  ta.value = lines.join("\n");
+  ta.oninput = () => { edits[r.key] = ta.value.split("\n"); picked.add(r.key); sync(); };
+  ta.onkeydown = e => {
+    if (e.key === "Escape" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) { e.preventDefault(); closeEditor(tr, r); }
+  };
+  const cell = tr.querySelector(".fix");
+  cell.innerHTML = "";
+  cell.append(ta, Object.assign(document.createElement("div"), {className: "muted",
+    textContent: "One subtitle line per row. This replaces the whole cue as written, so keep any other fix you want. Empty deletes the cue."}));
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+  tr.querySelector(".actions").innerHTML = `<button class="small done">Done</button>`;
+  if (!edits[r.key]) { edits[r.key] = lines.slice(); picked.add(r.key); }
+  sync();
+}
+
+function closeEditor(tr, r) {
+  if (edits[r.key] && edits[r.key].join("\n") === r.edit_text.join("\n") && r.has_fix) {
+    delete edits[r.key];  // unchanged: keep the suggestion
+  }
+  showFix(tr, r);
+  showActions(tr, r);
+  sync();
+}
+
+function revertEdit(tr, r) {
+  delete edits[r.key];
+  if (r.bucket === "call" || !r.has_fix) picked.delete(r.key);
+  showFix(tr, r);
+  showActions(tr, r);
+  sync();
+}
+
+function showFix(tr, r) {
+  const cell = tr.querySelector(".fix");
+  if (edits[r.key]) {
+    const mine = edits[r.key].filter(l => l.trim()).join(" / ");
+    cell.innerHTML = `<span class="mine">Your text</span> ` + (mine ? slashes(diff(r.current || "", mine)[1]) : "<i>Delete this cue</i>");
+  } else {
+    const b = r.suggested && r.suggested !== "Delete this cue" ? diff(r.current || "", r.suggested)[1] : esc(r.suggested || "–");
+    cell.innerHTML = slashes(b);
+  }
+}
+
+function showActions(tr, r) {
+  tr.querySelector(".actions").innerHTML = edits[r.key]
+    ? `<button class="small edit">Edit</button> <button class="small undo" title="Go back to the suggested fix">Undo</button>`
+    : `<button class="small edit">Edit</button>`;
 }
 
 function sync() {

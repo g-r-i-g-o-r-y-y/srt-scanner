@@ -39,8 +39,12 @@ Rows fall into the same three groups as the skill's report. Needs your call hold
 (possible real-word OCR errors, credits that might be official) and stays off until you tick a row.
 Corrections (OCR misreads, place names, fansub credits) are on by default. Formatting fixes are
 grouped by type (curly quotes, dash spacing, ellipses, file format), so you can tick or untick a whole
-group, or click it to see each line. **Edit** on any correction lets you type your own fix; an empty
-box deletes the cue.
+group, or click it to see each line.
+
+To override a suggestion, click the suggested fix (or **Edit**) on any row and type what the line
+should say, one subtitle line per row. Your text replaces the whole cue as written and is marked
+*Your text*; **Undo** goes back to the suggestion, and an empty box deletes the cue. Ctrl+Enter or Esc
+closes the box.
 
 Unknown words (names, slang) get an **Accept** button so they're never flagged again, and names
 spelled two ways in one file (Kenji / Kenzi) are listed at the top of that file.
